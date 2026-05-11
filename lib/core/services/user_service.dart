@@ -5,10 +5,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 class UserService extends ChangeNotifier {
   static const _key = 'user_uuid';
   String _userId = '';
+  Future<void>? _initFuture;
+  bool _initialized = false;
 
   String get userId => _userId;
+  bool get isInitialized => _initialized;
 
   Future<void> init() async {
+    if (_initialized) return;
+    if (_initFuture != null) return _initFuture;
+
+    _initFuture = _doInit();
+    return _initFuture;
+  }
+
+  Future<void> _doInit() async {
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getString(_key);
     if (stored != null && stored.isNotEmpty) {
@@ -17,6 +28,7 @@ class UserService extends ChangeNotifier {
       _userId = _generateUuid();
       await prefs.setString(_key, _userId);
     }
+    _initialized = true;
     notifyListeners();
   }
 

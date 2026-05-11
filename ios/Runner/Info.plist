@@ -49,5 +49,20 @@
 	<string>小碎需要麦克风权限来录制您的语音记忆</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>小碎需要语音识别权限来转写您的录音</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>小碎需要访问网络来连接记忆服务</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>101.35.55.189</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

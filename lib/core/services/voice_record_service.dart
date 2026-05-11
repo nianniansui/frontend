@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'api_service.dart';
 
 // Web 专用 blob fetch，通过条件导入隔离平台代码
@@ -32,8 +31,7 @@ class VoiceRecordService extends ChangeNotifier {
 
   Future<bool> requestPermission() async {
     if (kIsWeb) return await _recorder.hasPermission();
-    final status = await Permission.microphone.request();
-    return status.isGranted;
+    return _recorder.hasPermission();
   }
 
   Future<void> startRecording() async {

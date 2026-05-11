@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -10,8 +12,8 @@ import 'shared/theme/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final userService = UserService();
-  await userService.init();
   runApp(XiaoSuiApp(userService: userService));
+  unawaited(userService.init());
 }
 
 class XiaoSuiApp extends StatelessWidget {
@@ -21,7 +23,7 @@ class XiaoSuiApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final api = ApiService(
-      baseUrl: kIsWeb ? '' : 'http://localhost:8000',
+      baseUrl: kIsWeb ? '' : 'http://101.35.55.189:8000',
     );
 
     return MultiProvider(

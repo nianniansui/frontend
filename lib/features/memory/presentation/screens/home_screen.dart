@@ -16,19 +16,29 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _memories = [];
-  bool _loading = true;
+  bool _loading = false;
   bool _isOffline = false;
   final _cache = MemoryCache();
 
   @override
   void initState() {
     super.initState();
-    _loadMemories();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadMemories();
+    });
   }
 
   Future<void> _loadMemories() async {
+    if (mounted) {
+      setState(() => _loading = true);
+    }
+
     final api = context.read<ApiService>();
-    final userId = context.read<UserService>().userId;
+    final userService = context.read<UserService>();
+    await userService.init();
+    if (!mounted) return;
+
+    final userId = userService.userId;
 
     // 先读缓存，立即渲染
     final cached = await _cache.getMemories(userId);
@@ -38,7 +48,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 再请求 API 更新
     try {
-      final data = await api.listMemories(userId: userId);
+      final data = await api
+          .listMemories(userId: userId)
+          .timeout(const Duration(seconds: 6));
       for (final m in data) {
         await _cache.upsertMemory({...m, 'user_id': userId});
       }
@@ -49,7 +61,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _isOffline = _memories.isNotEmpty;
+          _isOffline = true;
         });
       }
     }
