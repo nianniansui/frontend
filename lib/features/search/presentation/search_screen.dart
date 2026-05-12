@@ -7,7 +7,9 @@ import '../../../shared/widgets/permission_dialogs.dart';
 import '../../memory/presentation/widgets/memory_card.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  final String? initialQuery;
+
+  const SearchScreen({super.key, this.initialQuery});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -15,14 +17,35 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
+  final _focus = FocusNode();
   bool _loading = false;
   String? _answer;
   List<Map<String, dynamic>> _sources = [];
   String? _error;
 
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialQuery != null && widget.initialQuery!.trim().isNotEmpty) {
+      _controller.text = widget.initialQuery!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _search(widget.initialQuery!);
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
+  }
+
   Future<void> _search(String query) async {
     if (query.trim().isEmpty) return;
-    setState(() { _loading = true; _error = null; _answer = null; _sources = []; });
+    setState(() {
+      _loading = true;
+      _error = null;
+      _answer = null;
+      _sources = [];
+    });
 
     try {
       final api = context.read<ApiService>();
@@ -86,7 +109,8 @@ class _SearchScreenState extends State<SearchScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    style: const TextStyle(color: Colors.white),
+                    focusNode: _focus,
+                    style: TextStyle(color: theme.colorScheme.onSurface),
                     decoration: InputDecoration(
                       hintText: '问一问，比如"剪刀在哪"',
                       hintStyle: theme.textTheme.bodyMedium,
@@ -96,7 +120,10 @@ class _SearchScreenState extends State<SearchScreen> {
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
                       ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                     onSubmitted: _search,
                   ),
@@ -118,13 +145,15 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                     child: Icon(
                       voiceSvc.isRecording ? Icons.stop : Icons.mic,
-                      color: Colors.white,
+                      color: voiceSvc.isRecording
+                          ? Colors.white
+                          : theme.colorScheme.onSurface,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.search, color: Colors.white),
+                  icon: Icon(Icons.search, color: theme.colorScheme.onSurface),
                   onPressed: () => _search(_controller.text),
                 ),
               ],
@@ -134,10 +163,15 @@ class _SearchScreenState extends State<SearchScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                    ? Center(child: Text(_error!, style: theme.textTheme.bodyMedium))
+                    ? Center(
+                        child: Text(_error!, style: theme.textTheme.bodyMedium),
+                      )
                     : _answer == null
                         ? Center(
-                            child: Text('输入问题或按麦克风语音提问', style: theme.textTheme.bodyMedium),
+                            child: Text(
+                              '输入问题或按麦克风语音提问',
+                              style: theme.textTheme.bodyMedium,
+                            ),
                           )
                         : ListView(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -145,10 +179,12 @@ class _SearchScreenState extends State<SearchScreen> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                                  color: theme.colorScheme.primary
+                                      .withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                                    color: theme.colorScheme.primary
+                                        .withValues(alpha: 0.4),
                                   ),
                                 ),
                                 child: Column(
@@ -156,19 +192,29 @@ class _SearchScreenState extends State<SearchScreen> {
                                   children: [
                                     Row(
                                       children: [
-                                        Icon(Icons.auto_awesome, size: 16, color: theme.colorScheme.primary),
+                                        Icon(Icons.auto_awesome,
+                                            size: 16,
+                                            color: theme.colorScheme.primary),
                                         const SizedBox(width: 6),
-                                        Text('AI 回答', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w600)),
+                                        Text(
+                                          'AI 回答',
+                                          style: TextStyle(
+                                            color: theme.colorScheme.primary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-                                    Text(_answer!, style: theme.textTheme.bodyLarge),
+                                    Text(_answer!,
+                                        style: theme.textTheme.bodyLarge),
                                   ],
                                 ),
                               ),
                               if (_sources.isNotEmpty) ...[
                                 const SizedBox(height: 16),
-                                Text('相关记录', style: theme.textTheme.bodyMedium),
+                                Text('相关记录',
+                                    style: theme.textTheme.bodyMedium),
                                 const SizedBox(height: 8),
                                 ..._sources.map((m) => MemoryCard(memory: m)),
                               ],
@@ -183,6 +229,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _focus.dispose();
     super.dispose();
   }
 }

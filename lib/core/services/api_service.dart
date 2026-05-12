@@ -45,20 +45,59 @@ class ApiService {
     if (streamed.statusCode != 200) {
       throw Exception('add_memory failed ${streamed.statusCode}: $body');
     }
-    return jsonDecode(body) as Map<String, dynamic>;
+    return jsonDecode(utf8.decode(body.codeUnits)) as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> listMemories({
     String userId = 'default',
     int limit = 20,
+    String? before,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/v1/memories')
-        .replace(queryParameters: {'user_id': userId, 'limit': '$limit'});
+    final params = {'user_id': userId, 'limit': '$limit'};
+    if (before != null) params['before'] = before;
+    final uri = Uri.parse('$baseUrl/api/v1/memories').replace(queryParameters: params);
     final resp = await http.get(uri).timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
       throw Exception('list_memories failed ${resp.statusCode}');
     }
-    return (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
+    return (jsonDecode(utf8.decode(resp.bodyBytes)) as List)
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<void> deleteMemory({
+    required String memoryId,
+    String userId = 'default',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/memories/$memoryId')
+        .replace(queryParameters: {'user_id': userId});
+    final resp = await http.delete(uri).timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw Exception('delete_memory failed ${resp.statusCode}');
+    }
+  }
+
+  Future<Map<String, dynamic>> updateMemory({
+    required String memoryId,
+    String userId = 'default',
+    String? summary,
+    String? rawText,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/memories/$memoryId')
+        .replace(queryParameters: {'user_id': userId});
+    final payload = <String, dynamic>{};
+    if (summary != null) payload['summary'] = summary;
+    if (rawText != null) payload['raw_text'] = rawText;
+    final resp = await http
+        .patch(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw Exception('update_memory failed ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> search({
@@ -77,6 +116,6 @@ class ApiService {
     if (resp.statusCode != 200) {
       throw Exception('search failed ${resp.statusCode}');
     }
-    return jsonDecode(resp.body) as Map<String, dynamic>;
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
   }
 }
