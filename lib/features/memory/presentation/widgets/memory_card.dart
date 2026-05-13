@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/audio_player_service.dart';
+import '../../../../core/services/audio_storage.dart';
 
 /// 记忆卡片，支持：
 /// - 点击播放原音
@@ -25,11 +26,21 @@ class MemoryCard extends StatefulWidget {
 
 class _MemoryCardState extends State<MemoryCard> {
   final _player = AudioPlayerService.instance;
+  bool _audioExists = false;
 
   @override
   void initState() {
     super.initState();
     _player.addListener(_onPlayerChanged);
+    _checkAudio();
+  }
+
+  @override
+  void didUpdateWidget(covariant MemoryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.memory['audio_path'] != widget.memory['audio_path']) {
+      _checkAudio();
+    }
   }
 
   @override
@@ -38,23 +49,33 @@ class _MemoryCardState extends State<MemoryCard> {
     super.dispose();
   }
 
+  Future<void> _checkAudio() async {
+    final stored = widget.memory['audio_path'] as String?;
+    if (kIsWeb || stored == null || stored.isEmpty) {
+      if (mounted && _audioExists) setState(() => _audioExists = false);
+      return;
+    }
+    final exists = await AudioStorage.exists(stored);
+    if (!mounted) return;
+    if (exists != _audioExists) setState(() => _audioExists = exists);
+  }
+
   void _onPlayerChanged() {
     if (mounted) setState(() {});
   }
 
   String get _id => widget.memory['id'] as String? ?? '';
-  String? get _audioPath => widget.memory['audio_path'] as String?;
-  bool get _hasAudio => !kIsWeb && (_audioPath?.isNotEmpty ?? false);
+  String? get _stored => widget.memory['audio_path'] as String?;
+  bool get _hasAudio => _audioExists;
 
   Future<void> _togglePlay() async {
     if (!_hasAudio) return;
     try {
-      await _player.toggle(id: _id, path: _audioPath!);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      final resolved = await AudioStorage.resolve(_stored!);
+      await _player.toggle(id: _id, path: resolved);
+    } catch (_) {
+      // 播放失败多半是文件已消失，静默隐藏按钮即可
+      if (mounted) setState(() => _audioExists = false);
     }
   }
 

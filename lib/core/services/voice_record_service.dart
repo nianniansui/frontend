@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'api_service.dart';
+import 'audio_storage.dart';
 
 import 'blob_fetcher_stub.dart'
     if (dart.library.js_interop) 'blob_fetcher_web.dart';
@@ -21,6 +21,7 @@ class VoiceRecordService extends ChangeNotifier {
   ProcessingStage _processingStage = ProcessingStage.uploading;
   String? _lastError;
   String? _tempFilePath;
+  String? _lastRecordedFilename;
 
   final List<double> _amplitudeHistory = List.filled(20, 0.0);
   StreamSubscription<Amplitude>? _amplitudeSub;
@@ -70,13 +71,10 @@ class VoiceRecordService extends ChangeNotifier {
       if (kIsWeb) {
         await _recorder.start(config, path: '');
       } else {
-        final dir = await getApplicationDocumentsDirectory();
-        final audioDir = Directory('${dir.path}/audio');
-        if (!await audioDir.exists()) {
-          await audioDir.create(recursive: true);
-        }
-        _tempFilePath =
-            '${audioDir.path}/xiaosui_${DateTime.now().millisecondsSinceEpoch}.wav';
+        final audioDirPath = await AudioStorage.audioDir();
+        final filename = AudioStorage.newFileName();
+        _tempFilePath = '$audioDirPath/$filename';
+        _lastRecordedFilename = filename;
         await _recorder.start(config, path: _tempFilePath!);
       }
 
@@ -154,8 +152,8 @@ class VoiceRecordService extends ChangeNotifier {
           userId: userId,
         );
         _tempFilePath = null;
-        // 音频保留在本地，挂到返回 map 上供上层写入缓存
-        return {...result, 'audio_path': localAudioPath};
+        // 只挂文件名；绝对路径在 iOS 重装后会失效
+        return {...result, 'audio_path': _lastRecordedFilename};
       }
     } catch (e) {
       _lastError = '上传失败: $e';

@@ -40,12 +40,14 @@ class ApiService {
       ));
 
     final streamed = await request.send().timeout(const Duration(seconds: 60));
-    final body = await streamed.stream.bytesToString();
+    final bodyBytes = await streamed.stream.toBytes();
 
     if (streamed.statusCode != 200) {
-      throw Exception('add_memory failed ${streamed.statusCode}: $body');
+      throw Exception(
+        'add_memory failed ${streamed.statusCode}: ${utf8.decode(bodyBytes, allowMalformed: true)}',
+      );
     }
-    return jsonDecode(utf8.decode(body.codeUnits)) as Map<String, dynamic>;
+    return jsonDecode(utf8.decode(bodyBytes)) as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> listMemories({
