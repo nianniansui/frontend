@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'core/db/memory_cache.dart';
 import 'core/services/api_service.dart';
+import 'core/services/share_ingest_service.dart';
 import 'core/services/theme_service.dart';
 import 'core/services/user_service.dart';
 import 'core/services/voice_record_service.dart';
@@ -33,12 +35,15 @@ class XiaoSuiApp extends StatelessWidget {
     final api = ApiService(
       baseUrl: kIsWeb ? '' : 'http://101.35.55.189:8000',
     );
+    final shareIngest = ShareIngestService(api, MemoryCache())
+      ..userIdProvider = () => userService.userId;
 
     return MultiProvider(
       providers: [
         Provider<ApiService>.value(value: api),
         ChangeNotifierProvider<UserService>.value(value: userService),
         ChangeNotifierProvider<ThemeService>.value(value: themeService),
+        ChangeNotifierProvider<ShareIngestService>.value(value: shareIngest),
         ChangeNotifierProvider(
           create: (_) => VoiceRecordService(api),
         ),

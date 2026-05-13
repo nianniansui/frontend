@@ -50,6 +50,26 @@ class ApiService {
     return jsonDecode(utf8.decode(bodyBytes)) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> addMemoryText({
+    required String text,
+    String userId = 'default',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/add_memory_text');
+    final resp = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'text': text, 'user_id': userId}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (resp.statusCode != 200) {
+      throw Exception(
+        'add_memory_text failed ${resp.statusCode}: ${utf8.decode(resp.bodyBytes, allowMalformed: true)}',
+      );
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> listMemories({
     String userId = 'default',
     int limit = 20,

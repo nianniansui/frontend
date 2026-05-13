@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/services/share_ingest_service.dart';
 import '../../../../core/services/theme_service.dart';
 import '../../../../core/services/user_service.dart';
 import '../../../../core/db/memory_cache.dart';
@@ -16,7 +17,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const _pageSize = 20;
 
   List<Map<String, dynamic>> _memories = [];
@@ -31,18 +32,45 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadMemories();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _loadMemories();
+      if (!mounted) return;
+      await _drainShareQueue();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _drainShareQueue();
+    }
+  }
+
+  /// 处理 Share Extension 推过来的待处理文字队列
+  Future<void> _drainShareQueue() async {
+    final share = context.read<ShareIngestService>();
+    final userId = context.read<UserService>().userId;
+    if (userId.isEmpty) return;
+    final added = await share.processPending(userId);
+    if (added.isEmpty || !mounted) return;
+    setState(() {
+      _memories = [...added.reversed, ..._memories];
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已收下 ${added.length} 条分享')),
+    );
   }
 
   void _onScroll() {
