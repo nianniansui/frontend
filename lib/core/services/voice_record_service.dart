@@ -23,7 +23,7 @@ class VoiceRecordService extends ChangeNotifier {
   String? _tempFilePath;
   String? _lastRecordedFilename;
 
-  final List<double> _amplitudeHistory = List.filled(20, 0.0);
+  final List<double> _amplitudeHistory = List<double>.filled(20, 0.0, growable: true);
   StreamSubscription<Amplitude>? _amplitudeSub;
   Timer? _stageTimer;
 
