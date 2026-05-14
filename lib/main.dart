@@ -12,13 +12,25 @@ import 'core/services/voice_record_service.dart';
 import 'features/memory/presentation/screens/home_screen.dart';
 import 'shared/theme/app_theme.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  final userService = UserService();
-  final themeService = ThemeService();
-  runApp(XiaoSuiApp(userService: userService, themeService: themeService));
-  unawaited(userService.init());
-  unawaited(themeService.load());
+void main() {
+  // 把所有 zone 未处理异常 / Flutter framework 异常捕住，避免冷启动栈顶异常秒崩
+  runZonedGuarded<void>(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      debugPrint('[XiaoSui] FlutterError: ${details.exceptionAsString()}\n${details.stack}');
+    };
+
+    final userService = UserService();
+    final themeService = ThemeService();
+    runApp(XiaoSuiApp(userService: userService, themeService: themeService));
+    unawaited(userService.init());
+    unawaited(themeService.load());
+  }, (error, stack) {
+    // 捕住最后一道防线：异步路径里抛出的未 catch 异常
+    debugPrint('[XiaoSui] Uncaught zone error: $error\n$stack');
+  });
 }
 
 class XiaoSuiApp extends StatelessWidget {

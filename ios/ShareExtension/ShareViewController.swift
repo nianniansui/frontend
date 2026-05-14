@@ -1,6 +1,7 @@
 import UIKit
 import Social
 import UniformTypeIdentifiers
+import os.log
 
 /// 小碎 Share Extension
 ///
@@ -19,22 +20,20 @@ final class ShareViewController: SLComposeServiceViewController {
     private static let pendingKey = "pendingShares"
     // 主应用 URL scheme，用于分享结束后尝试拉起主 App 触发处理
     private static let hostScheme = "xiaosui"
+    private static let log = OSLog(subsystem: "com.xiaosui.xiaosui.ShareExtension", category: "share")
 
     override func isContentValid() -> Bool {
-        // contentText 是用户在弹窗里看到的（并可编辑的）文字
         let text = (contentText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return !text.isEmpty
     }
 
     override func presentationAnimationDidFinish() {
         super.presentationAnimationDidFinish()
-        // 如果系统没有自动把分享源的文字塞进来，我们从 attachments 里尝试读一次
         prefillFromAttachmentsIfNeeded()
     }
 
     override func didSelectPost() {
         let userTyped = (contentText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-
         enqueueAndFinish(withFallback: userTyped)
     }
 
@@ -58,7 +57,6 @@ final class ShareViewController: SLComposeServiceViewController {
     }
 
     private func extractText(from item: NSExtensionItem, completion: @escaping (String?) -> Void) {
-        // 1. 先把 attributedContentText 当主来源
         if let attributed = item.attributedContentText?.string,
            !attributed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             completion(attributed)
@@ -70,7 +68,6 @@ final class ShareViewController: SLComposeServiceViewController {
             return
         }
 
-        // 2. 先找 public.plain-text
         for provider in attachments where provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
             provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { value, _ in
                 if let s = value as? String { completion(s); return }
@@ -79,7 +76,6 @@ final class ShareViewController: SLComposeServiceViewController {
             return
         }
 
-        // 3. 回退到 URL 转文本
         for provider in attachments where provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
             provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { value, _ in
                 if let url = value as? URL { completion(url.absoluteString); return }
@@ -106,23 +102,29 @@ final class ShareViewController: SLComposeServiceViewController {
             var queue = defaults.array(forKey: Self.pendingKey) as? [String] ?? []
             queue.append(trimmed)
             defaults.set(queue, forKey: Self.pendingKey)
+            defaults.synchronize()
+            os_log("appended share, queue size now %{public}d", log: Self.log, type: .info, queue.count)
+        } else {
+            os_log("UserDefaults(suiteName:) returned nil — App Group entitlement on extension missing?", log: Self.log, type: .error)
         }
 
-        // 尝试用 URL scheme 拉起主应用（非必需，失败也没关系，主应用回到前台会自己处理）
         openHostAppIfPossible()
         extensionContext?.completeRequest(returningItems: nil)
     }
 
     private func openHostAppIfPossible() {
         guard let url = URL(string: "\(Self.hostScheme)://shared") else { return }
-        // SLComposeServiceViewController 没有直接 open 的方法，走 responder chain 查 UIApplication
         var responder: UIResponder? = self
         while let current = responder {
             if let app = current as? UIApplication {
-                app.open(url, options: [:], completionHandler: nil)
+                app.open(url, options: [:], completionHandler: { ok in
+                    os_log("open(host scheme) result=%{public}@", log: Self.log, type: .info, ok ? "true" : "false")
+                })
                 return
             }
             responder = current.next
         }
+        os_log("could not find UIApplication via responder chain", log: Self.log, type: .error)
     }
 }
+

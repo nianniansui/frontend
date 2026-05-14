@@ -18,13 +18,28 @@ class ShareIngestService extends ChangeNotifier {
   final List<Map<String, dynamic>> _ingested = [];
   bool _processing = false;
 
+  /// 当原生层 / 宿主调用 processPending 写入新记忆时通知 UI
+  final StreamController<List<Map<String, dynamic>>> _ingestStream =
+      StreamController.broadcast();
+
+  Stream<List<Map<String, dynamic>>> get ingestStream => _ingestStream.stream;
+
   ShareIngestService(this._api, this._cache) {
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == 'sharesAvailable') {
-        // 扩展写完数据后，主应用被唤起时原生层会通知一次
-        await processPending(userIdProvider?.call() ?? 'default');
-      }
-    });
+    if (_isIOS()) {
+      _channel.setMethodCallHandler((call) async {
+        // ignore: avoid_print
+        print('[ShareIngest] received method: ${call.method}');
+        if (call.method == 'sharesAvailable') {
+          final userId = userIdProvider?.call() ?? '';
+          if (userId.isEmpty) {
+            // ignore: avoid_print
+            print('[ShareIngest] sharesAvailable arrived but userId empty');
+            return;
+          }
+          await processPending(userId);
+        }
+      });
+    }
   }
 
   /// 允许宿主在用户登录后注入 user id 取得函数
@@ -34,20 +49,23 @@ class ShareIngestService extends ChangeNotifier {
   List<Map<String, dynamic>> get ingested => List.unmodifiable(_ingested);
 
   Future<List<String>> _fetchPending() async {
-    if (!defaultTargetPlatform.name.contains('iOS') && !_isIOS()) return [];
+    if (!_isIOS()) return [];
     try {
       final result =
           await _channel.invokeMethod<List<dynamic>>('fetchPending');
       return (result ?? []).map((e) => e.toString()).toList();
     } on MissingPluginException {
+      // ignore: avoid_print
+      print('[ShareIngest] platform channel not registered yet');
       return [];
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('[ShareIngest] fetchPending failed: $e');
       return [];
     }
   }
 
   bool _isIOS() {
-    // kIsWeb 在 web 下为 true，其它平台用 defaultTargetPlatform
     if (kIsWeb) return false;
     return defaultTargetPlatform == TargetPlatform.iOS;
   }
@@ -60,6 +78,8 @@ class ShareIngestService extends ChangeNotifier {
     notifyListeners();
 
     final texts = await _fetchPending();
+    // ignore: avoid_print
+    print('[ShareIngest] drained ${texts.length} pending share(s)');
     final results = <Map<String, dynamic>>[];
     try {
       for (final t in texts) {
@@ -69,16 +89,25 @@ class ShareIngestService extends ChangeNotifier {
           final memory = await _api.addMemoryText(text: text, userId: userId);
           await _cache.upsertMemory({...memory, 'user_id': userId});
           results.add(memory);
-        } catch (_) {
-          // 单条失败不影响后续；失败数据已在 UserDefaults 里被消费了，
-          // 为了不让同一条反复失败，先按"尽力而为"丢弃。
+        } catch (e) {
+          // ignore: avoid_print
+          print('[ShareIngest] addMemoryText failed: $e');
         }
       }
       _ingested.addAll(results);
+      if (results.isNotEmpty) {
+        _ingestStream.add(results);
+      }
     } finally {
       _processing = false;
       notifyListeners();
     }
     return results;
+  }
+
+  @override
+  void dispose() {
+    _ingestStream.close();
+    super.dispose();
   }
 }

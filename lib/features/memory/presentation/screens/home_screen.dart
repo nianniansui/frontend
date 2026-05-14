@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/services/api_service.dart';
@@ -28,12 +30,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _cache = MemoryCache();
   final _scroll = ScrollController();
   final _searchCtrl = TextEditingController();
+  StreamSubscription<List<Map<String, dynamic>>>? _ingestSub;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
+
+    // 监听 Share Ingest 流：原生层主动推过来的也能即时入流
+    _ingestSub = context.read<ShareIngestService>().ingestStream.listen((added) {
+      if (added.isEmpty || !mounted) return;
+      setState(() {
+        _memories = [...added.reversed, ..._memories];
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已收下 ${added.length} 条分享')),
+      );
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await _loadMemories();
@@ -44,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _ingestSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
@@ -58,19 +74,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// 处理 Share Extension 推过来的待处理文字队列
+  /// 主动拉一次。原生层 sharesAvailable 的回调也会触发 processPending，
+  /// 但 URL scheme 唤起时的回调时序不稳，多调一次确保不漏。
   Future<void> _drainShareQueue() async {
     final share = context.read<ShareIngestService>();
-    final userId = context.read<UserService>().userId;
+    final userService = context.read<UserService>();
+    // user 还没 init 完时直接 await，确保 userId 拿到
+    await userService.init();
+    final userId = userService.userId;
     if (userId.isEmpty) return;
-    final added = await share.processPending(userId);
-    if (added.isEmpty || !mounted) return;
-    setState(() {
-      _memories = [...added.reversed, ..._memories];
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已收下 ${added.length} 条分享')),
-    );
+    await share.processPending(userId);
+    // 注意：UI 更新走 _ingestSub 流，避免和 sharesAvailable 重复 setState
   }
 
   void _onScroll() {
