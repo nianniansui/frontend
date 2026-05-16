@@ -9,6 +9,7 @@ import '../../../../core/services/share_ingest_service.dart';
 import '../../../../core/services/theme_service.dart';
 import '../../../../core/services/user_service.dart';
 import '../../../../core/services/voice_record_service.dart';
+import '../../../../core/services/widget_bridge.dart';
 import '../../../../core/db/memory_cache.dart';
 import '../../../../main.dart' show pendingNotificationPayload;
 import '../widgets/record_button.dart';
@@ -57,6 +58,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已收下 ${added.length} 条分享')),
       );
+      // 用最新一条更新 widget
+      final newest = added.last;
+      final preview =
+          (newest['summary'] as String?)?.trim().isNotEmpty == true
+              ? newest['summary'] as String
+              : (newest['raw_text'] as String? ?? '');
+      if (preview.isNotEmpty) {
+        unawaited(WidgetBridge.updateLatestSummary(preview));
+      }
+      // share 摄入也可能产生提醒
+      unawaited(_syncNotifications());
     });
 
     // 诊断流：把 share 链路的每一步显示为 Snackbar，方便真机定位
@@ -306,6 +318,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _cache.upsertMemory({...memory, 'user_id': userId});
     if (!mounted) return;
     setState(() => _memories.insert(0, memory));
+    // 推到 Widget App Group：让主屏 widget 立刻显示这条
+    final preview =
+        (memory['summary'] as String?)?.trim().isNotEmpty == true
+            ? memory['summary'] as String
+            : (memory['raw_text'] as String? ?? '');
+    if (preview.isNotEmpty) {
+      unawaited(WidgetBridge.updateLatestSummary(preview));
+    }
+    // 录音也可能挟带未来事件，刷一次通知队列
+    unawaited(_syncNotifications());
   }
 
   Future<void> _onDelete(Map<String, dynamic> memory) async {
@@ -400,6 +422,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _memories[idx] = memory;
         }
       });
+      // 推到 Widget App Group
+      final preview =
+          (memory['summary'] as String?)?.trim().isNotEmpty == true
+              ? memory['summary'] as String
+              : (memory['raw_text'] as String? ?? t);
+      unawaited(WidgetBridge.updateLatestSummary(preview));
       // 录新记忆后顺便刷新一次本地通知队列（可能新增了提醒）
       unawaited(_syncNotifications());
     } catch (e) {

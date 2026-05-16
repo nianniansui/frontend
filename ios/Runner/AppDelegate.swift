@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import WidgetKit
 import os.log
 
 @main
@@ -9,10 +10,12 @@ import os.log
   private static let pendingKey = "pendingShares"
   private static let shareChannelName = "com.xiaosui.xiaosui/share"
   private static let deepLinkChannelName = "com.xiaosui.xiaosui/deeplink"
+  private static let widgetChannelName = "com.xiaosui.xiaosui/widget"
   private static let log = OSLog(subsystem: "com.xiaosui.xiaosui", category: "share")
 
   private var shareChannel: FlutterMethodChannel?
   private var deepLinkChannel: FlutterMethodChannel?
+  private var widgetChannel: FlutterMethodChannel?
 
   /// Widget / 通知 / URL scheme 冷启动时携带的初始 deep link，
   /// 等 Flutter 端 ready 之后（调用 initialLink）一次性消费。
@@ -61,7 +64,34 @@ import os.log
         }
       }
       deepLinkChannel = deep
-      os_log("share + deeplink channels registered", log: AppDelegate.log, type: .info)
+
+      // widget channel：Flutter 把"最近一条摘要"写入 App Group，触发 widget 刷新
+      let widget = FlutterMethodChannel(
+        name: AppDelegate.widgetChannelName,
+        binaryMessenger: controller.binaryMessenger
+      )
+      widget.setMethodCallHandler { [weak self] call, result in
+        guard let self else { return }
+        switch call.method {
+        case "updateLatestSummary":
+          guard let args = call.arguments as? [String: Any],
+                let text = args["text"] as? String else {
+            result(FlutterError(code: "invalid_args", message: "missing text", details: nil))
+            return
+          }
+          let kind = args["kind"] as? String ?? "XiaosuiWidget"
+          self.writeLatestSummary(text)
+          // 通知 WidgetCenter 刷新对应 kind
+          if #available(iOS 14.0, *) {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+          }
+          result(true)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+      widgetChannel = widget
+      os_log("share + deeplink + widget channels registered", log: AppDelegate.log, type: .info)
     } else {
       os_log("rootViewController is not FlutterViewController", log: AppDelegate.log, type: .error)
     }
@@ -133,5 +163,15 @@ import os.log
       return []
     }
     return defaults.array(forKey: AppDelegate.pendingKey) as? [String] ?? []
+  }
+
+  private func writeLatestSummary(_ text: String) {
+    guard let defaults = UserDefaults(suiteName: AppDelegate.appGroupId) else {
+      os_log("widget update: App Group missing", log: AppDelegate.log, type: .error)
+      return
+    }
+    defaults.set(text, forKey: "latestSummary")
+    defaults.set(Date().timeIntervalSince1970, forKey: "latestSummaryAt")
+    defaults.synchronize()
   }
 }
