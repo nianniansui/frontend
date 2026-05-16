@@ -1,12 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/services/notification_service.dart';
 import '../../../../core/services/share_ingest_service.dart';
 import '../../../../core/services/theme_service.dart';
 import '../../../../core/services/user_service.dart';
+import '../../../../core/services/voice_record_service.dart';
 import '../../../../core/db/memory_cache.dart';
+import '../../../../main.dart' show pendingNotificationPayload;
 import '../widgets/record_button.dart';
 import '../widgets/memory_card.dart';
 import '../../../search/presentation/search_screen.dart';
@@ -21,6 +25,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const _pageSize = 20;
+  /// 与原生层共享的 deep link channel：widget / 通知点击会推过来
+  static const _deepLinkChannel = MethodChannel('com.xiaosui.xiaosui/deeplink');
 
   List<Map<String, dynamic>> _memories = [];
   bool _loading = false;
@@ -31,15 +37,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _scroll = ScrollController();
   final _searchCtrl = TextEditingController();
   StreamSubscription<List<Map<String, dynamic>>>? _ingestSub;
+  StreamSubscription<String>? _diagSub;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
+    pendingNotificationPayload.addListener(_onPendingPayloadChanged);
+
+    final share = context.read<ShareIngestService>();
 
     // 监听 Share Ingest 流：原生层主动推过来的也能即时入流
-    _ingestSub = context.read<ShareIngestService>().ingestStream.listen((added) {
+    _ingestSub = share.ingestStream.listen((added) {
       if (added.isEmpty || !mounted) return;
       setState(() {
         _memories = [...added.reversed, ..._memories];
@@ -49,17 +59,56 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     });
 
+    // 诊断流：把 share 链路的每一步显示为 Snackbar，方便真机定位
+    _diagSub = share.diagStream.listen((msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text('share · $msg'),
+        ),
+      );
+    });
+
+    // 原生 deep link → "widget tap → 立即录音" / "通知点击 → 跳到对应记忆"
+    _deepLinkChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'openRecord':
+          if (mounted) await _startQuickRecord();
+          break;
+        case 'openMemory':
+          final id = call.arguments as String?;
+          if (id != null && mounted) _openMemory(id);
+          break;
+      }
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await _loadMemories();
       if (!mounted) return;
       await _drainShareQueue();
+      if (!mounted) return;
+      await _syncNotifications();
+      if (!mounted) return;
+      _onPendingPayloadChanged(); // 若冷启动是通知点开的，立刻消费
+      // 原生进来的初始 deep link（widget tap 冷启动）
+      try {
+        final initial = await _deepLinkChannel.invokeMethod<String>('initialLink');
+        if (initial == 'record' && mounted) {
+          await _startQuickRecord();
+        }
+      } on MissingPluginException {
+        // 还没注册原生端，忽略
+      }
     });
   }
 
   @override
   void dispose() {
     _ingestSub?.cancel();
+    _diagSub?.cancel();
+    pendingNotificationPayload.removeListener(_onPendingPayloadChanged);
     WidgetsBinding.instance.removeObserver(this);
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
@@ -71,6 +120,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _drainShareQueue();
+      _syncNotifications();
+      _onPendingPayloadChanged();
+    }
+  }
+
+  void _onPendingPayloadChanged() {
+    final payload = pendingNotificationPayload.value;
+    if (payload == null) return;
+    pendingNotificationPayload.value = null; // 消费一次
+    if (payload.startsWith('memory:')) {
+      _openMemory(payload.substring('memory:'.length));
+    }
+  }
+
+  Future<void> _syncNotifications() async {
+    final api = context.read<ApiService>();
+    final userService = context.read<UserService>();
+    await userService.init();
+    if (userService.userId.isEmpty) return;
+    await NotificationService.instance.syncFromServer(
+      api: api,
+      userId: userService.userId,
+    );
+  }
+
+  /// widget / 通知点击触发的快速录音。直接驱动 VoiceRecordService 进入录音态。
+  Future<void> _startQuickRecord() async {
+    final voice = context.read<VoiceRecordService>();
+    final userService = context.read<UserService>();
+    await userService.init();
+    if (voice.state == RecordingState.recording) return;
+    if (voice.state == RecordingState.processing) return;
+    await voice.startRecording();
+    if (!mounted) return;
+    if (voice.lastError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(voice.lastError!)),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 1),
+          content: Text('正在录音，说完后再点中央按钮停止'),
+        ),
+      );
+    }
+  }
+
+  /// 通知点击 / 搜索结果跳转：滚动到对应记忆并高亮（简化为 Snackbar 提示）
+  void _openMemory(String id) {
+    final idx = _memories.indexWhere((m) => m['id'] == id);
+    if (idx < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('找不到这条记忆，可能已被删除')),
+      );
+      return;
+    }
+    // 滚到对应位置（粗略：每张卡片 96px）
+    if (_scroll.hasClients) {
+      _scroll.animateTo(
+        (idx * 96).toDouble(),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     }
   }
 
@@ -254,6 +367,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// 顶部 "+ 文字" 按钮 → 弹底部输入框 → /add_memory_text
+  Future<void> _addMemoryFromText(String text) async {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    final api = context.read<ApiService>();
+    final userService = context.read<UserService>();
+    await userService.init();
+    if (!mounted) return;
+    final userId = userService.userId;
+    if (userId.isEmpty) return;
+
+    // 占位卡片，让用户即时感知到记入成功
+    final placeholderId = 'local-${DateTime.now().microsecondsSinceEpoch}';
+    final placeholder = {
+      'id': placeholderId,
+      'raw_text': t,
+      'summary': null,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'user_id': userId,
+      '_pending': true,
+    };
+    setState(() => _memories = [placeholder, ..._memories]);
+
+    try {
+      final memory = await api.addMemoryText(text: t, userId: userId);
+      await _cache.upsertMemory({...memory, 'user_id': userId});
+      if (!mounted) return;
+      setState(() {
+        final idx = _memories.indexWhere((m) => m['id'] == placeholderId);
+        if (idx >= 0) {
+          _memories[idx] = memory;
+        }
+      });
+      // 录新记忆后顺便刷新一次本地通知队列（可能新增了提醒）
+      unawaited(_syncNotifications());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _memories.removeWhere((m) => m['id'] == placeholderId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('记入失败：$e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -290,34 +447,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          // 顶部大搜索框——把"找回"放到和"记"同等的位置
+          // 顶部行：左边大搜索框 + 右边"+ 文字"快速记入按钮
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: GestureDetector(
-              onTap: () => _openSearch(),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: theme.dividerColor.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search, size: 20, color: theme.textTheme.bodyMedium?.color),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '问一问，比如"剪刀在哪"',
-                        style: theme.textTheme.bodyMedium,
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _openSearch(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: theme.dividerColor.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.search,
+                              size: 20,
+                              color: theme.textTheme.bodyMedium?.color),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '问一问，比如"剪刀在哪"',
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ),
+                          Icon(Icons.mic_none,
+                              size: 20,
+                              color: theme.textTheme.bodyMedium?.color),
+                        ],
                       ),
                     ),
-                    Icon(Icons.mic_none, size: 20, color: theme.textTheme.bodyMedium?.color),
-                  ],
+                  ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                _TextInputButton(onSubmit: _addMemoryFromText),
+              ],
             ),
           ),
           if (_isOffline)
@@ -505,6 +675,104 @@ class _EmptyState extends StatelessWidget {
           }).toList(),
         ),
       ],
+    );
+  }
+}
+
+/// 顶部右侧"+ 文字"按钮：点开后弹底部输入框，方便不想说话的场景
+class _TextInputButton extends StatelessWidget {
+  final Future<void> Function(String text) onSubmit;
+
+  const _TextInputButton({required this.onSubmit});
+
+  Future<void> _open(BuildContext context) async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        final inset = MediaQuery.of(ctx).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + inset),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '随手记一笔',
+                style: Theme.of(ctx).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLines: 5,
+                minLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  hintText: '车牌号、密码、停车位置…什么都行',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('取消'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.check),
+                    label: const Text('记入'),
+                    onPressed: () =>
+                        Navigator.pop(ctx, controller.text.trim()),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (result != null && result.isNotEmpty) {
+      await onSubmit(result);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: () => _open(context),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.3),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.edit_outlined,
+                size: 18, color: theme.colorScheme.primary),
+            const SizedBox(width: 6),
+            Text(
+              '文字',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

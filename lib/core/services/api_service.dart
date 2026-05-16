@@ -140,4 +140,32 @@ class ApiService {
     }
     return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
   }
+
+  Future<List<Map<String, dynamic>>> upcomingReminders({
+    String userId = 'default',
+    int days = 7,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/reminders/upcoming').replace(
+      queryParameters: {'user_id': userId, 'days': '$days'},
+    );
+    final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) {
+      throw Exception('upcoming_reminders failed ${resp.statusCode}');
+    }
+    return (jsonDecode(utf8.decode(resp.bodyBytes)) as List)
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>?> recapToday({
+    String userId = 'default',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/recap/today').replace(
+      queryParameters: {'user_id': userId},
+    );
+    final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) {
+      throw Exception('recap_today failed ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
 }

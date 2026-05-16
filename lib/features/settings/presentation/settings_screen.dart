@@ -1,11 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../core/services/api_service.dart';
+import '../../../core/services/notification_service.dart';
 import '../../../core/services/theme_service.dart';
 import '../../../core/services/user_service.dart';
 import '../../../core/db/memory_cache.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _recapEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService.instance.isRecapEnabled().then((v) {
+      if (mounted) setState(() => _recapEnabled = v);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +55,53 @@ class SettingsScreen extends StatelessWidget {
             selected: themeSvc.mode == ThemeMode.dark,
             icon: Icons.dark_mode_outlined,
             onTap: () => themeSvc.setMode(ThemeMode.dark),
+          ),
+          const _SectionHeader(title: '提醒'),
+          ListTile(
+            leading: const Icon(Icons.notifications_active_outlined),
+            title: const Text('开启通知'),
+            subtitle: Text(
+              '让小碎在有日程或重要内容时提醒你',
+              style: theme.textTheme.bodyMedium,
+            ),
+            onTap: () async {
+              final ok = await NotificationService.instance.requestPermission();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(ok
+                      ? '已开启通知权限'
+                      : '请到 设置 → 小碎 → 通知 中手动开启'),
+                ),
+              );
+              if (ok) {
+                final api = context.read<ApiService>();
+                await NotificationService.instance.syncFromServer(
+                  api: api,
+                  userId: userSvc.userId,
+                );
+              }
+            },
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.wb_sunny_outlined),
+            title: const Text('每日回顾'),
+            subtitle: Text(
+              '每天早上挑一条旧记忆推送，让记过的事重新被想起',
+              style: theme.textTheme.bodyMedium,
+            ),
+            value: _recapEnabled,
+            onChanged: (v) async {
+              setState(() => _recapEnabled = v);
+              await NotificationService.instance.setRecapEnabled(v);
+              if (v && context.mounted) {
+                final api = context.read<ApiService>();
+                await NotificationService.instance.syncFromServer(
+                  api: api,
+                  userId: userSvc.userId,
+                );
+              }
+            },
           ),
           const _SectionHeader(title: '账号'),
           ListTile(
