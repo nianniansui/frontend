@@ -70,6 +70,35 @@ class ApiService {
     return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
   }
 
+  /// 仅做 STT 转写，不存入记忆。用于搜索页语音提问。
+  Future<String?> transcribeOnly({
+    required Uint8List audioBytes,
+    required String mimeType,
+    String userId = 'default',
+    String filename = 'audio.wav',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/transcribe');
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['user_id'] = userId
+      ..files.add(http.MultipartFile.fromBytes(
+        'audio',
+        audioBytes,
+        filename: filename,
+        contentType: MediaType.parse(mimeType),
+      ));
+
+    final streamed = await request.send().timeout(const Duration(seconds: 30));
+    final bodyBytes = await streamed.stream.toBytes();
+
+    if (streamed.statusCode != 200) {
+      throw Exception(
+        'transcribe failed ${streamed.statusCode}: ${utf8.decode(bodyBytes, allowMalformed: true)}',
+      );
+    }
+    final data = jsonDecode(utf8.decode(bodyBytes)) as Map<String, dynamic>;
+    return data['text'] as String?;
+  }
+
   Future<List<Map<String, dynamic>>> listMemories({
     String userId = 'default',
     int limit = 20,

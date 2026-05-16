@@ -184,6 +184,55 @@ class VoiceRecordService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 停止录音并仅做 STT 转写，不存入记忆。用于搜索页语音提问。
+  /// 返回转写文本，失败返回 null。
+  Future<String?> stopAndTranscribeOnly({String userId = 'default'}) async {
+    if (_state != RecordingState.recording) return null;
+
+    _resetAmplitude();
+    _state = RecordingState.processing;
+    _processingStage = ProcessingStage.transcribing;
+    notifyListeners();
+
+    try {
+      if (kIsWeb) {
+        final blobUrl = await _recorder.stop();
+        if (blobUrl == null || blobUrl.isEmpty) throw Exception('录音数据为空');
+        final bytes = await fetchBlobBytes(blobUrl);
+        final result = await _api.transcribeOnly(
+          audioBytes: bytes,
+          mimeType: 'audio/wav',
+          userId: userId,
+        );
+        return result;
+      } else {
+        await _recorder.stop();
+        if (_tempFilePath == null) throw Exception('录音文件路径为空');
+        final file = File(_tempFilePath!);
+        final result = await _api.transcribeOnly(
+          audioBytes: await file.readAsBytes(),
+          mimeType: 'audio/wav',
+          userId: userId,
+        );
+        // 提问录音不保留文件
+        if (await file.exists()) await file.delete();
+        _tempFilePath = null;
+        return result;
+      }
+    } catch (e) {
+      _lastError = '转写失败: $e';
+      if (!kIsWeb && _tempFilePath != null) {
+        final f = File(_tempFilePath!);
+        if (await f.exists()) await f.delete();
+        _tempFilePath = null;
+      }
+      return null;
+    } finally {
+      _state = RecordingState.idle;
+      notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
     _amplitudeSub?.cancel();

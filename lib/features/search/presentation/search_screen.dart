@@ -79,9 +79,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
     if (voiceSvc.state == RecordingState.recording) {
       final userId = context.read<UserService>().userId;
-      final result = await voiceSvc.stopAndUpload(userId: userId);
-      if (result != null) {
-        final text = result['raw_text'] as String? ?? '';
+      final text = await voiceSvc.stopAndTranscribeOnly(userId: userId);
+      if (text != null && text.trim().isNotEmpty) {
         _controller.text = text;
         _search(text);
       }
