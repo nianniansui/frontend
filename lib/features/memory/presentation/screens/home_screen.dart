@@ -389,7 +389,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// 顶部 "+ 文字" 按钮 → 弹底部输入框 → /add_memory_text
+  /// 底部"文字"按钮：弹底部 sheet 输入文字记忆，确认后走 /add_memory_text
+  Future<void> _showTextInputSheet() async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        final inset = MediaQuery.of(ctx).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + inset),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '随手记一笔',
+                style: Theme.of(ctx).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLines: 5,
+                minLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  hintText: '车牌号、密码、停车位置…什么都行',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('取消'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.check),
+                    label: const Text('记入'),
+                    onPressed: () =>
+                        Navigator.pop(ctx, controller.text.trim()),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (result != null && result.isNotEmpty) {
+      await _addMemoryFromText(result);
+    }
+  }
+
+  /// "+ 文字" 按钮 → 弹底部输入框 → /add_memory_text
   Future<void> _addMemoryFromText(String text) async {
     final t = text.trim();
     if (t.isEmpty) return;
@@ -475,49 +534,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          // 顶部行：左边大搜索框 + 右边"+ 文字"快速记入按钮
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _openSearch(),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: theme.dividerColor.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.search,
-                              size: 20,
-                              color: theme.textTheme.bodyMedium?.color),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '问一问，比如"剪刀在哪"',
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                          Icon(Icons.mic_none,
-                              size: 20,
-                              color: theme.textTheme.bodyMedium?.color),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _TextInputButton(onSubmit: _addMemoryFromText),
-              ],
-            ),
-          ),
           if (_isOffline)
             Container(
               width: double.infinity,
@@ -567,7 +583,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: RecordButton(onRecordComplete: _onRecordComplete),
+      floatingActionButton: _BottomActionRow(
+        onAsk: () => _openSearch(),
+        onAddText: () => _showTextInputSheet(),
+        onRecordComplete: _onRecordComplete,
+      ),
     );
   }
 }
@@ -707,100 +727,91 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-/// 顶部右侧"+ 文字"按钮：点开后弹底部输入框，方便不想说话的场景
-class _TextInputButton extends StatelessWidget {
-  final Future<void> Function(String text) onSubmit;
+/// 底部三按钮：副(问) + 主(录音) + 副(文字)。
+/// 录音按钮自身的录音状态由 [RecordButton] 内部用 Provider 管理，
+/// 这里只负责把它放进一个对称的横排里。
+class _BottomActionRow extends StatelessWidget {
+  final VoidCallback onAsk;
+  final VoidCallback onAddText;
+  final void Function(Map<String, dynamic> memory) onRecordComplete;
 
-  const _TextInputButton({required this.onSubmit});
+  const _BottomActionRow({
+    required this.onAsk,
+    required this.onAddText,
+    required this.onRecordComplete,
+  });
 
-  Future<void> _open(BuildContext context) async {
-    final controller = TextEditingController();
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) {
-        final inset = MediaQuery.of(ctx).viewInsets.bottom;
-        return Padding(
-          padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + inset),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                '随手记一笔',
-                style: Theme.of(ctx).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                maxLines: 5,
-                minLines: 3,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText: '车牌号、密码、停车位置…什么都行',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('取消'),
-                  ),
-                  const Spacer(),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.check),
-                    label: const Text('记入'),
-                    onPressed: () =>
-                        Navigator.pop(ctx, controller.text.trim()),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        _SideActionButton(
+          icon: Icons.search,
+          label: '问',
+          onTap: onAsk,
+        ),
+        const SizedBox(width: 32),
+        RecordButton(onRecordComplete: onRecordComplete),
+        const SizedBox(width: 32),
+        _SideActionButton(
+          icon: Icons.edit_note_outlined,
+          label: '文字',
+          onTap: onAddText,
+        ),
+      ],
     );
-    if (result != null && result.isNotEmpty) {
-      await onSubmit(result);
-    }
   }
+}
+
+/// 录音按钮两侧的副操作按钮：48 圆形 + 下方文字标签。
+class _SideActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SideActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InkWell(
-      onTap: () => _open(context),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primary.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: theme.colorScheme.primary.withValues(alpha: 0.3),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.edit_outlined,
-                size: 18, color: theme.colorScheme.primary),
-            const SizedBox(width: 6),
-            Text(
-              '文字',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.w600,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: theme.colorScheme.primary.withValues(alpha: 0.12),
+              border: Border.all(
+                color: theme.colorScheme.primary.withValues(alpha: 0.3),
               ),
             ),
-          ],
+            child: Icon(
+              icon,
+              size: 22,
+              color: theme.colorScheme.primary,
+            ),
+          ),
         ),
-      ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }
